@@ -2,14 +2,12 @@ const { onRequest } = require("firebase-functions/v2/https")
 // The Firebase Admin SDK to access Firestore.
 const { initializeApp } = require("firebase-admin/app")
 const { getFirestore, Timestamp } = require("firebase-admin/firestore")
-import { onDocumentCreated } from "firebase-functions/v2/firestore"
+const { onDocumentCreated } = require("firebase-functions/v2/firestore")
+const { setGlobalOptions } = require("firebase-functions/v2")
+setGlobalOptions({ maxInstances: 10 })
 
 initializeApp()
-import OpenAI from "openai"
-
-const openai = new OpenAI({
-	apiKey: process.env.OPENAI,
-})
+const { OpenAI } = require("openai")
 
 async function updateMacros(macrosRef, macros) {
 	const data = (await macrosRef.get()).data()
@@ -40,7 +38,10 @@ async function updateMacros(macrosRef, macros) {
 	})
 }
 
-exports.chat = onRequest({ cors: true }, async (req, res) => {
+exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
+	const openai = new OpenAI({
+		apiKey: process.env.OPEN_AI_KEY,
+	})
 	const { msg } = req.body
 	const uid = req.auth.uid
 	const functions = [
@@ -118,7 +119,7 @@ exports.chat = onRequest({ cors: true }, async (req, res) => {
 		.where("date", "<=", endTimestamp)
 		.limit(1)
 
-	if (!dailyValsSnap) {
+	if ((await dailyValsSnap.get()).empty) {
 		userRef.collection("dailyMacros").add({
 			date: Timestamp.now(),
 			calories: 0,
@@ -131,7 +132,7 @@ exports.chat = onRequest({ cors: true }, async (req, res) => {
 	}
 
 	const dailyVals = (await dailyValsSnap.get()).docs[0].data()
-	const dailValsId = (await dailyValsSnap.get()).docs[0].id
+	const dailyValsId = (await dailyValsSnap.get()).docs[0].id
 	const userData = (await userRef.get()).data()
 	const {
 		allergies,
@@ -146,7 +147,7 @@ exports.chat = onRequest({ cors: true }, async (req, res) => {
 	const { calories, sodium, fat, protein, sugar, vitamins } = dailyVals
 
 	const history = (await userRef.get()).data().chatHistory
-	const messages = [
+	let messages = [
 		{
 			role: "system",
 			content: `You are a helpful nutrition assistant.
@@ -171,7 +172,7 @@ exports.chat = onRequest({ cors: true }, async (req, res) => {
       Additionally, you must provide advice to the user based on their macros and/or health info when asked.`,
 		},
 	]
-	messages.concat(history)
+	messages = messages.concat(history)
 	messages.push({ role: "user", content: msg })
 
 	const response = await openai.chat.completions.create({
@@ -193,7 +194,7 @@ exports.chat = onRequest({ cors: true }, async (req, res) => {
 		const functionToCall = availableFunctions[functionName]
 		const functionArgs = JSON.parse(responseMessage.function_call.arguments)
 		const functionResponse = functionToCall(
-			userRef.collection("dailyMacros").doc(dailValsId),
+			userRef.collection("dailyMacros").doc(dailyValsId),
 			functionArgs
 		)
 
