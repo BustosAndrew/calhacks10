@@ -146,11 +146,11 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
       Additionally, you must provide advice to the user based on their macros and/or health info when asked.`,
 		},
 	]
-	messages = messages.concat(history)
+	messages = messages.concat(history || [])
 	messages.push({ role: "user", content: msg })
 
 	const response = await openai.chat.completions.create({
-		model: "gpt-3.5-turbo",
+		model: "gpt-3.5-turbo-0613",
 		messages: messages,
 		functions: functions,
 		function_call: "auto",
@@ -180,7 +180,7 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 			content: functionResponse,
 		}) // extend conversation with function response
 		const secondResponse = await openai.chat.completions.create({
-			model: "gpt-3.5-turbo",
+			model: "gpt-3.5-turbo-0613",
 			messages: messages,
 		}) // get a new response from GPT where it can see the function response
 		messages.push(secondResponse.choices[0].message)
