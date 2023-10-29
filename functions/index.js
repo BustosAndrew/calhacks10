@@ -57,8 +57,7 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 	const openai = new OpenAI({
 		apiKey: process.env.OPEN_AI_KEY,
 	})
-	const { msg } = req.body
-	const uid = req.auth.uid
+	const { msg, uid } = req.body
 	const functions = [
 		{
 			name: "update_macros",
@@ -83,13 +82,14 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 	const endTimestamp = Timestamp.fromDate(endDate)
 
 	const userRef = getFirestore().collection("users").doc(uid)
-	const dailyValsSnap = userRef
+	const dailyValsSnap = await userRef
 		.collection("dailyMacros")
 		.where("date", ">=", startTimestamp)
 		.where("date", "<=", endTimestamp)
 		.limit(1)
+		.get()
 
-	if ((await dailyValsSnap.get()).empty) {
+	if (dailyValsSnap.empty) {
 		userRef.collection("dailyMacros").add({
 			date: Timestamp.now(),
 			calories: 0,
@@ -103,8 +103,8 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 		})
 	}
 
-	const dailyVals = (await dailyValsSnap.get()).docs[0].data()
-	const dailyValsId = (await dailyValsSnap.get()).docs[0].id
+	const dailyVals = dailyValsSnap.docs[0].data()
+	const dailyValsId = dailyValsSnap.docs[0].id
 	const userData = (await userRef.get()).data()
 	const {
 		allergies,
@@ -127,22 +127,22 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
       Your job is to review a user's health info and daily macros then update the latter based on what the user tells you,
       such as when they eat or drink something. 
       Here's their health info:
-      Allergies: ${allergies}
-      Health Issues (list): ${healthIssues}
-      Goal Weight: ${goalWeight}
-      Goal Calories: ${goalcals}
-      Goal Fat: ${goalfat}
-      Goal Protein: ${goalprotein}
-      Goal Sodium: ${goalsodium}
-      Goal Sugar: ${goalsugar}.
+      Allergies: ${allergies ?? "None"}
+      Health Issues (list): ${healthIssues ?? "None"}
+      Goal Weight: ${goalWeight ?? "None"}
+      Goal Calories: ${goalcals ?? "None"}
+      Goal Fat: ${goalfat ?? "None"}
+      Goal Protein: ${goalprotein ?? "None"}
+      Goal Sodium: ${goalsodium ?? "None"}
+      Goal Sugar: ${goalsugar ?? "None"}.
       Here are today's macros (if any):
-      Calories: ${calories}
-      Sodium: ${sodium}
-			Carbs: ${carbs}
-      Fat: ${fat}
-      Protein: ${protein}
-      Sugar: ${sugar}
-      Vitamins: ${vitamins}.
+      Calories: ${calories ?? "None"}
+      Sodium: ${sodium ?? "None"}
+			Carbs: ${carbs ?? "None"}
+      Fat: ${fat ?? "None"}
+      Protein: ${protein ?? "None"}
+      Sugar: ${sugar ?? "None"}
+      Vitamins: ${vitamins ?? "None"}.
       Additionally, you must provide advice to the user based on their macros and/or health info when asked.`,
 		},
 	]
