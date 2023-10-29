@@ -9,15 +9,27 @@ setGlobalOptions({ maxInstances: 10 })
 initializeApp()
 const { OpenAI } = require("openai")
 
-async function updateMacros(macrosRef, macros) {
+async function updateMacros(macrosRef, name, servingSize) {
+	const foodRef = getFirestore()
+		.collection("foods")
+		.where("name", "==", name)
+		.limit(1)
+	if ((await foodRef.get()).empty) {
+		return JSON.stringify({
+			err: "Food not found",
+		})
+	}
+	const food = (await foodRef.get()).docs[0].data()
+	const foodId = (await foodRef.get()).docs[0].id
 	const data = (await macrosRef.get()).data()
-	const { calories, sodium, fat, protein, sugar, vitamins } = macros
-	const newCalories = data.calories + calories.value * calories.servingSize
-	const newSodium = data.sodium + sodium.value * sodium.servingSize
-	const newFat = data.fat + fat.value * fat.servingSize
-	const newProtein = data.protein + protein.value * protein.servingSize
-	const newSugar = data.sugar + sugar.value * sugar.servingSize
-	const newVitamins = data.vitamins + vitamins.value * vitamins.servingSize
+	const { calories, sodium, fat, protein, sugar, vitamins, carbs } = food
+	const newCalories = data.calories + calories * servingSize
+	const newSodium = data.sodium + sodium * servingSize
+	const newFat = data.fat + fat * servingSize
+	const newProtein = data.protein + protein * servingSize
+	const newSugar = data.sugar + sugar * servingSize
+	const newVitamins = data.vitamins + vitamins * servingSize
+	const newCarbs = data.carbs + carbs * servingSize
 
 	macrosRef.update({
 		calories: newCalories,
@@ -26,6 +38,8 @@ async function updateMacros(macrosRef, macros) {
 		protein: newProtein,
 		sugar: newSugar,
 		vitamins: newVitamins,
+		carbs: newCarbs,
+		foods: [...data.foods, foodId],
 	})
 
 	return JSON.stringify({
@@ -35,6 +49,7 @@ async function updateMacros(macrosRef, macros) {
 		protein: newProtein,
 		sugar: newSugar,
 		vitamins: newVitamins,
+		carbs: newCarbs,
 	})
 }
 
@@ -48,59 +63,14 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 		{
 			name: "update_macros",
 			description:
-				"Update the user's macros based on what they ate or drank. If the user ate or drank something but serving size is not specified, it is assumed to be 1. If the user ate or drank multiple servings, specify the number of servings. For example, if the user ate 2 servings of a food, specify the serving size as 2. If the user ate 1/2 of a serving, specify the serving size as 0.5. Lastly, if the user ate or drank something that has no property like vitamins, assign that property with value and serving size as 0. For example, if the user drank regular water, assign sodium and some other properties with value and serving size as 0.",
+				"Update the user's macros based on what they ate or drank. First, fix any spelling mistake of the food/drink name, also ensuring that the first word of the name is capitalized. If the user ate or drank something but serving size is not specified, it is assumed to be 1. If the user ate or drank multiple servings, specify the number of servings. For example, if the user ate 2 servings of a food, specify the serving size as 2. If the user ate 1/2 of a serving, specify the serving size as 0.5. Lastly, if the user ate or drank something that has no property like vitamins, assign that property with value and serving size as 0. For example, if the user drank regular water, assign sodium and some other relevant properties with value and serving size as 0.",
 			parameters: {
 				type: "object",
 				properties: {
-					macros: {
-						type: "object",
-						properties: {
-							calories: {
-								type: "object",
-								properties: {
-									value: { type: "number" },
-									servingSize: { type: "number" },
-								},
-							},
-							sodium: {
-								type: "object",
-								properties: {
-									value: { type: "number" },
-									servingSize: { type: "number" },
-								},
-							},
-							fat: {
-								type: "object",
-								properties: {
-									value: { type: "number" },
-									servingSize: { type: "number" },
-								},
-							},
-							protein: {
-								type: "object",
-								properties: {
-									value: { type: "number" },
-									servingSize: { type: "number" },
-								},
-							},
-							sugar: {
-								type: "object",
-								properties: {
-									value: { type: "number" },
-									servingSize: { type: "number" },
-								},
-							},
-							vitamins: {
-								type: "object",
-								properties: {
-									value: { type: "number" },
-									servingSize: { type: "number" },
-								},
-							},
-						},
-					},
+					name: { type: "string" },
+					servingSize: { type: "number" },
 				},
-				required: ["macros"],
+				required: ["servingSize", "name"],
 			},
 		},
 	]
@@ -128,6 +98,8 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 			protein: 0,
 			sugar: 0,
 			vitamins: 0,
+			carbs: 0,
+			foods: [],
 		})
 	}
 
@@ -144,7 +116,8 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 		goalsugar,
 		healthIssues,
 	} = userData
-	const { calories, sodium, fat, protein, sugar, vitamins } = dailyVals
+	const { calories, sodium, fat, protein, sugar, vitamins, carbs, foods } =
+		dailyVals
 
 	const history = (await userRef.get()).data().chatHistory
 	let messages = [
@@ -161,10 +134,11 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
       Goal Fat: ${goalfat}
       Goal Protein: ${goalprotein}
       Goal Sodium: ${goalsodium}
-      Goal Sugar: ${goalsugar}
+      Goal Sugar: ${goalsugar}.
       Here are today's macros (if any):
       Calories: ${calories}
       Sodium: ${sodium}
+			Carbs: ${carbs}
       Fat: ${fat}
       Protein: ${protein}
       Sugar: ${sugar}
