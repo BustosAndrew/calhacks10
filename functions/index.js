@@ -4,6 +4,7 @@ const { initializeApp } = require("firebase-admin/app")
 const { getFirestore, Timestamp } = require("firebase-admin/firestore")
 const { onDocumentCreated } = require("firebase-functions/v2/firestore")
 const { setGlobalOptions } = require("firebase-functions/v2")
+const { logger } = require("firebase-functions")
 setGlobalOptions({ maxInstances: 10 })
 
 initializeApp()
@@ -15,9 +16,7 @@ async function updateMacros(macrosRef, name, servingSize) {
 		.where("name", "==", name)
 		.limit(1)
 	if ((await foodRef.get()).empty) {
-		return JSON.stringify({
-			err: "Food not found",
-		})
+		return "Food not found."
 	}
 	const food = (await foodRef.get()).docs[0].data()
 	const foodId = (await foodRef.get()).docs[0].id
@@ -42,15 +41,14 @@ async function updateMacros(macrosRef, name, servingSize) {
 		foods: [...data.foods, foodId],
 	})
 
-	return JSON.stringify({
-		calories: newCalories,
-		sodium: newSodium,
-		fat: newFat,
-		protein: newProtein,
-		sugar: newSugar,
-		vitamins: newVitamins,
-		carbs: newCarbs,
-	})
+	return `Your updated macros are:
+		calories: ${newCalories},
+		sodium: ${newSodium},
+		fat: ${newFat},
+		protein: ${newProtein},
+		sugar: ${newSugar},
+		vitamins: ${newVitamins},
+		carbs: ${newCarbs},`
 }
 
 exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
@@ -150,7 +148,7 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 	messages.push({ role: "user", content: msg })
 
 	const response = await openai.chat.completions.create({
-		model: "gpt-3.5-turbo-0613",
+		model: "gpt-3.5-turbo",
 		messages: messages,
 		functions: functions,
 		function_call: "auto",
@@ -167,9 +165,10 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 		const functionName = responseMessage.function_call.name
 		const functionToCall = availableFunctions[functionName]
 		const functionArgs = JSON.parse(responseMessage.function_call.arguments)
-		const functionResponse = functionToCall(
+		const functionResponse = await functionToCall(
 			userRef.collection("dailyMacros").doc(dailyValsId),
-			functionArgs
+			functionArgs.name,
+			functionArgs.servingSize
 		)
 
 		// send the info on the function call and function response to GPT
@@ -179,15 +178,17 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 			name: functionName,
 			content: functionResponse,
 		}) // extend conversation with function response
+		logger.log(messages)
 		const secondResponse = await openai.chat.completions.create({
-			model: "gpt-3.5-turbo-0613",
+			model: "gpt-3.5-turbo",
 			messages: messages,
 		}) // get a new response from GPT where it can see the function response
 		messages.push(secondResponse.choices[0].message)
 		userRef.update({
 			chatHistory: messages,
 		})
-		return res.json({ msg: secondResponse.choices[0].message.content })
+		// res.json({ msg: secondResponse.choices[0].message.content })
+		res.status(200)
 	}
 
 	messages.push(response.choices[0].message)
@@ -196,7 +197,8 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 		chatHistory: messages,
 	})
 
-	res.json({ msg: response.choices[0].message.content })
+	// res.json({ msg: response.choices[0].message.content })
+	res.status(200)
 })
 
 exports.createuser = onDocumentCreated("users/{userId}", (event) => {
