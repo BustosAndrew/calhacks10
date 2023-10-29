@@ -16,7 +16,9 @@ async function updateMacros(macrosRef, name, servingSize) {
 		.where("name", "==", name)
 		.limit(1)
 	if ((await foodRef.get()).empty) {
-		return "Food not found."
+		return JSON.stringify({
+			err: "Food not found",
+		})
 	}
 	const food = (await foodRef.get()).docs[0].data()
 	const foodId = (await foodRef.get()).docs[0].id
@@ -41,14 +43,30 @@ async function updateMacros(macrosRef, name, servingSize) {
 		foods: [...data.foods, foodId],
 	})
 
-	return `Your updated macros are:
-		calories: ${newCalories},
-		sodium: ${newSodium},
-		fat: ${newFat},
-		protein: ${newProtein},
-		sugar: ${newSugar},
-		vitamins: ${newVitamins},
-		carbs: ${newCarbs},`
+	return JSON.stringify({
+		calories: newCalories,
+		sodium: newSodium,
+		fat: newFat,
+		protein: newProtein,
+		sugar: newSugar,
+		vitamins: newVitamins,
+		carbs: newCarbs,
+	})
+}
+
+async function createMealPlan(userRef) {
+	const maxCals = (await userRef.get()).data().goalcals
+	userRef.collection("mealPlans").add({
+		monday: ["JhvOblDaEiPEEKEtYhZz"],
+		tuesday: ["JhvOblDaEiPEEKEtYhZz"],
+		wednesday: ["JhvOblDaEiPEEKEtYhZz"],
+		thursday: ["JhvOblDaEiPEEKEtYhZz"],
+		friday: ["JhvOblDaEiPEEKEtYhZz"],
+		maxCals: maxCals ?? 2000,
+	})
+	return JSON.stringify({
+		result: "Meal plan created",
+	})
 }
 
 exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
@@ -68,6 +86,15 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 					servingSize: { type: "number" },
 				},
 				required: ["servingSize", "name"],
+			},
+		},
+		{
+			name: "create_meal_plan",
+			description:
+				"Create a meal plan for the user. There are no arguments to pass.",
+			parameters: {
+				type: "object",
+				properties: {},
 			},
 		},
 	]
@@ -141,7 +168,8 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
       Protein: ${protein ?? "None"}
       Sugar: ${sugar ?? "None"}
       Vitamins: ${vitamins ?? "None"}.
-      Additionally, you must provide advice to the user based on their macros and/or health info when asked.`,
+      Additionally, you must provide advice to the user based on their macros and/or health info when asked.
+			Lastly, you may be asked to create a meal plan for the user.`,
 		},
 	]
 	messages = messages.concat(history || [])
@@ -161,15 +189,23 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 		// Note: the JSON response may not always be valid; be sure to handle errors
 		const availableFunctions = {
 			update_macros: updateMacros,
+			create_meal_plan: createMealPlan,
 		}
 		const functionName = responseMessage.function_call.name
 		const functionToCall = availableFunctions[functionName]
-		const functionArgs = JSON.parse(responseMessage.function_call.arguments)
-		const functionResponse = await functionToCall(
-			userRef.collection("dailyMacros").doc(dailyValsId),
-			functionArgs.name,
-			functionArgs.servingSize
-		)
+		const functionArgs =
+			JSON.parse(responseMessage.function_call?.arguments) ?? {}
+		let functionResponse = {}
+
+		if (functionName === "update_macros") {
+			functionResponse = await functionToCall(
+				userRef.collection("dailyMacros").doc(dailyValsId),
+				functionArgs.name,
+				functionArgs.servingSize
+			)
+		} else if (functionName === "create_meal_plan") {
+			functionResponse = await functionToCall(userRef)
+		}
 
 		// send the info on the function call and function response to GPT
 		messages.push(responseMessage) // extend conversation with assistant's reply
@@ -178,7 +214,6 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 			name: functionName,
 			content: functionResponse,
 		}) // extend conversation with function response
-		logger.log(messages)
 		const secondResponse = await openai.chat.completions.create({
 			model: "gpt-3.5-turbo",
 			messages: messages,
