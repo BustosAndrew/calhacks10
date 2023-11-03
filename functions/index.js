@@ -133,6 +133,8 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 	const userData = (await userRef.get()).data()
 	const {
 		allergies,
+		weight,
+		height,
 		goalWeight,
 		goalcals,
 		goalfat,
@@ -145,8 +147,10 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
 		dailyVals
 
 	const history = (await userRef.get()).data().chatHistory
-	let messages = [
-		{
+	const date = history.shift()
+	const isNewDay = Timestamp.now().toDate().getDay() != date.toDate().getDay()
+	if (isNewDay)
+		history[1] = {
 			role: "system",
 			content: `You are a helpful nutrition assistant.
       Your job is to review a user's health info and daily macros then update the latter based on what the user tells you,
@@ -159,7 +163,9 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
       Goal Fat: ${goalfat ?? "None"}
       Goal Protein: ${goalprotein ?? "None"}
       Goal Sodium: ${goalsodium ?? "None"}
-      Goal Sugar: ${goalsugar ?? "None"}.
+      Goal Sugar: ${goalsugar ?? "None"}
+			Current Weight: ${weight}
+			Current Height: ${height}.
       Here are today's macros (if any):
       Calories: ${calories ?? "None"}
       Sodium: ${sodium ?? "None"}
@@ -170,9 +176,39 @@ exports.chat = onRequest({ cors: true, memory: 1024 }, async (req, res) => {
       Vitamins: ${vitamins ?? "None"}.
       Additionally, you must provide advice to the user based on their macros and/or health info when asked.
 			Lastly, you may be asked to create a meal plan for the user.`,
-		},
-	]
-	messages = messages.concat(history || [])
+		}
+
+	let messages = !(history.length > 0)
+		? [
+				{
+					role: "system",
+					content: `You are a helpful nutrition assistant.
+      Your job is to review a user's health info and daily macros then update the latter based on what the user tells you,
+      such as when they eat or drink something. 
+      Here's their health info:
+      Allergies: ${allergies ?? "None"}
+      Health Issues (list): ${healthIssues ?? "None"}
+      Goal Weight: ${goalWeight ?? "None"}
+      Goal Calories: ${goalcals ?? "None"}
+      Goal Fat: ${goalfat ?? "None"}
+      Goal Protein: ${goalprotein ?? "None"}
+      Goal Sodium: ${goalsodium ?? "None"}
+      Goal Sugar: ${goalsugar ?? "None"}
+			Current Weight: ${weight}
+			Current Height: ${height}.
+      Here are today's macros (if any):
+      Calories: ${calories ?? "None"}
+      Sodium: ${sodium ?? "None"}
+			Carbs: ${carbs ?? "None"}
+      Fat: ${fat ?? "None"}
+      Protein: ${protein ?? "None"}
+      Sugar: ${sugar ?? "None"}
+      Vitamins: ${vitamins ?? "None"}.
+      Additionally, you must provide advice to the user based on their macros and/or health info when asked.
+			Lastly, you may be asked to create a meal plan for the user.`,
+				},
+		  ]
+		: history
 	messages.push({ role: "user", content: msg })
 
 	const response = await openai.chat.completions.create({
@@ -250,6 +286,6 @@ exports.createuser = onDocumentCreated("users/{userId}", (event) => {
 	const uid = snapshot.id
 	const userRef = getFirestore().collection("users").doc(uid)
 	userRef.update({
-		chatHistory: [],
+		chatHistory: [Timestamp.now()],
 	})
 })
